@@ -144,10 +144,15 @@ class GitHubWebhookHandler {
     console.log(`🔍 Analyzing PR #${pull_request.number} in ${repository.full_name}`);
     
     try {
-      await this.analyzePR(
+      // Análisis simplificado usando información del webhook
+      const analysisResult = this.analyzeWebhookData(pull_request, repository);
+      const report = this.generateSimpleReport(analysisResult, pull_request);
+      
+      await this.commentOnPR(
         repository.owner.login,
         repository.name,
-        pull_request.number
+        pull_request.number,
+        report
       );
     } catch (error) {
       console.error('❌ PR Analysis failed:', error);
@@ -167,6 +172,112 @@ Please check the server logs or contact support.
 🔧 *Automated review by PR Code Reviewer*`
       );
     }
+  }
+
+  /**
+   * Análisis simplificado usando datos del webhook (sin API calls)
+   */
+  analyzeWebhookData(pull_request, repository) {
+    const results = {
+      projectType: 'unknown',
+      summary: { passed: 0, failed: 0, warnings: 0 },
+      issues: [],
+      warnings: [],
+      successes: []
+    };
+
+    // Detectar tipo de proyecto por nombre de repo y título
+    if (repository.name.includes('node') || pull_request.title.toLowerCase().includes('npm')) {
+      results.projectType = 'nodejs';
+    } else if (repository.name.includes('python') || pull_request.title.toLowerCase().includes('pip')) {
+      results.projectType = 'python';
+    } else {
+      results.projectType = 'general';
+    }
+
+    // Análisis básico basado en el contenido del PR
+    const prBody = pull_request.body || '';
+    const prTitle = pull_request.title || '';
+    
+    // Buscar indicadores de problemas en el título/descripción
+    if (prTitle.toLowerCase().includes('.env') || prBody.includes('.env')) {
+      results.issues.push({
+        type: 'env-file-mentioned',
+        message: '⚠️  PR mentions .env files - verify no sensitive data is committed',
+        suggestion: 'Ensure .env files are in .gitignore and not committed to the repository'
+      });
+      results.summary.failed++;
+    }
+
+    // Buenas prácticas encontradas
+    if (prBody.includes('test') || prTitle.toLowerCase().includes('test')) {
+      results.successes.push({
+        type: 'testing-mentioned',
+        message: '✅ PR mentions testing - good practice'
+      });
+      results.summary.passed++;
+    }
+
+    if (prBody.length > 20) {
+      results.successes.push({
+        type: 'good-description',
+        message: '✅ PR has a detailed description'
+      });
+      results.summary.passed++;
+    }
+
+    return results;
+  }
+
+  /**
+   * Genera reporte simplificado
+   */
+  generateSimpleReport(analysis, pr) {
+    let report = `🤖 **Code Structure Review** (Basic Analysis)
+
+📋 **PR:** ${pr.title}
+🔧 **Project type:** ${analysis.projectType}
+📊 **Analysis:** ${analysis.summary.passed} passed, ${analysis.summary.failed} failed, ${analysis.summary.warnings} warnings
+
+`;
+
+    // Issues
+    if (analysis.issues.length > 0) {
+      report += `## ⚠️  Potential Issues\n\n`;
+      analysis.issues.forEach(issue => {
+        report += `${issue.message}\n`;
+        if (issue.suggestion) {
+          report += `💡 *${issue.suggestion}*\n\n`;
+        }
+      });
+    }
+
+    // Successes  
+    if (analysis.successes.length > 0) {
+      report += `## ✅ Good Practices\n\n`;
+      analysis.successes.forEach(success => {
+        report += `${success.message}\n`;
+      });
+    }
+
+    // Nota sobre análisis básico
+    report += `\n## 📝 Note
+This is a basic analysis using PR metadata. For detailed file analysis, please ensure the GitHub App has proper permissions to read repository contents.
+
+### 🔧 Common Checks:
+- ✅ Avoid committing .env files
+- ✅ Use meaningful PR titles and descriptions  
+- ✅ Include tests when possible
+- ✅ Follow project structure conventions
+
+`;
+
+    report += `\n---
+🤖 *Automated review by [PR Code Reviewer](https://github.com/sarboleda72/pr-code-reviewer)*
+📊 Reviewed at: ${new Date().toISOString()}
+🔄 Commit: \`${pr.head.sha.substring(0, 7)}\``;
+
+    return report;
   }
 
   /**
