@@ -1,0 +1,12 @@
+{
+  "general": {
+    "requiredFiles": [".gitignore"],
+    "prohibitedFiles": [".env", ".env.local", ".env.production"],
+    "prohibitedFolders": ["node_modules", ".venv", "__pycache__"]
+  },
+  "validationRules": {
+    "checkGitignore": true,
+    "checkEnvFiles": true,
+    "checkDependencyFolders": true
+  }
+}

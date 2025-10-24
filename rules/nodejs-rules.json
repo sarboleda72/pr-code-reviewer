@@ -1,0 +1,19 @@
+{
+  "nodejs": {
+    "extends": "general",
+    "requiredFiles": [".gitignore", "package.json", "README.md"],
+    "recommendedStructure": {
+      "src": ["controllers", "services", "routes", "middlewares", "utils"],
+      "tests": ["unit", "integration"],
+      "config": []
+    },
+    "gitignoreRules": [
+      "node_modules/",
+      ".env*",
+      "npm-debug.log*",
+      ".nyc_output",
+      "coverage/",
+      "dist/"
+    ]
+  }
+}
