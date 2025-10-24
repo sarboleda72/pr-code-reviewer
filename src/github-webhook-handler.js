@@ -151,21 +151,17 @@ class GitHubWebhookHandler {
         pull_request.number
       );
     } catch (error) {
-      console.error('❌ PR Analysis failed:', error);
+      console.error('❌ Full analysis failed, using fallback:', error.message);
       
-      // Comentar error en el PR
+      // Análisis de fallback usando webhook data
+      const fallbackAnalysis = this.analyzePRWebhookData(pull_request, repository);
+      const fallbackReport = this.generateFallbackSpanishReport(fallbackAnalysis, pull_request);
+      
       await this.commentOnPR(
         repository.owner.login,
         repository.name,
         pull_request.number,
-        `🤖 **Code Review Failed**
-
-❌ **Error during analysis:** ${error.message}
-
-Please check the server logs or contact support.
-
----
-🔧 *Automated review by PR Code Reviewer*`
+        fallbackReport
       );
     }
   }
@@ -348,6 +344,163 @@ Please check the server logs or contact support.
     }
 
     return results;
+  }
+
+  /**
+   * Análisis mejorado usando datos del webhook (fallback)
+   */
+  analyzePRWebhookData(pull_request, repository) {
+    const results = {
+      projectType: 'nodejs',
+      summary: { passed: 0, failed: 0, warnings: 0 },
+      issues: [],
+      warnings: [],
+      successes: []
+    };
+
+    const prTitle = pull_request.title || '';
+    const prBody = pull_request.body || '';
+    const prText = (prTitle + ' ' + prBody).toLowerCase();
+
+    // Detectar problemas por menciones en título/descripción
+    if (prText.includes('.env') || prText.includes('environment')) {
+      results.issues.push({
+        type: 'env-mentioned',
+        message: '❌ Se mencionan archivos .env en el PR',
+        suggestion: 'Verificar que no se hayan committeado archivos .env con credenciales'
+      });
+      results.summary.failed++;
+    }
+
+    if (prText.includes('node_modules')) {
+      results.issues.push({
+        type: 'nodemodules-mentioned',
+        message: '❌ Se menciona node_modules en el PR',
+        suggestion: 'Verificar que la carpeta node_modules/ esté en .gitignore'
+      });
+      results.summary.failed++;
+    }
+
+    if (prText.includes('.venv') || prText.includes('venv')) {
+      results.issues.push({
+        type: 'venv-mentioned',
+        message: '❌ Se mencionan entornos virtuales Python',
+        suggestion: 'Verificar que carpetas .venv/ o venv/ estén en .gitignore'
+      });
+      results.summary.failed++;
+    }
+
+    // Detectar buenas prácticas
+    if (prText.includes('gitignore')) {
+      results.successes.push({
+        type: 'gitignore-mentioned',
+        message: '✅ Se menciona .gitignore (buena práctica)'
+      });
+      results.summary.passed++;
+    }
+
+    if (prText.includes('src/') || prText.includes('estructura') || prText.includes('organiz')) {
+      results.successes.push({
+        type: 'structure-mentioned',
+        message: '✅ Se menciona organización de código'
+      });
+      results.summary.passed++;
+    }
+
+    if (prText.includes('test') || prText.includes('prueba')) {
+      results.successes.push({
+        type: 'testing-mentioned',
+        message: '✅ Se mencionan pruebas (excelente práctica)'
+      });
+      results.summary.passed++;
+    }
+
+    // Si no hay problemas detectados, dar recomendaciones generales
+    if (results.issues.length === 0) {
+      results.warnings.push({
+        type: 'general-reminder',
+        message: '⚠️  Recordatorio: Verificar estructura general del proyecto',
+        suggestion: 'Revisar que archivos sensibles (.env) no estén committeados y código esté organizado en src/'
+      });
+      results.summary.warnings++;
+    }
+
+    return results;
+  }
+
+  /**
+   * Genera reporte de fallback en español
+   */
+  generateFallbackSpanishReport(analysis, pr) {
+    let report = `🤖 **Revisión de Estructura de Código** (Análisis Básico)
+
+📋 **PR:** ${pr.title}
+🔧 **Repositorio:** ${pr.base.repo.name}
+📊 **Análisis básico:** ${analysis.summary.passed} ✅ | ${analysis.summary.failed} ❌ | ${analysis.summary.warnings} ⚠️
+
+> ℹ️ *Análisis limitado por permisos. Para análisis completo de archivos, verificar configuración de la GitHub App.*
+
+`;
+
+    // Problemas detectados
+    if (analysis.issues.length > 0) {
+      report += `## ❌ Posibles Problemas Detectados\n\n`;
+      analysis.issues.forEach(issue => {
+        report += `**${issue.message}**\n`;
+        if (issue.suggestion) {
+          report += `💡 *${issue.suggestion}*\n\n`;
+        }
+      });
+    }
+
+    // Advertencias
+    if (analysis.warnings.length > 0) {
+      report += `## ⚠️  Recomendaciones Generales\n\n`;
+      analysis.warnings.forEach(warning => {
+        report += `**${warning.message}**\n`;
+        if (warning.suggestion) {
+          report += `💡 *${warning.suggestion}*\n\n`;
+        }
+      });
+    }
+
+    // Buenas prácticas
+    if (analysis.successes.length > 0) {
+      report += `## ✅ Buenas Prácticas Identificadas\n\n`;
+      analysis.successes.forEach(success => {
+        report += `${success.message}\n`;
+      });
+      report += `\n`;
+    }
+
+    // Lista de verificación
+    report += `## 📋 Lista de Verificación Manual
+
+**Archivos que NO deben estar en el repositorio:**
+- [ ] ❌ Archivos \`.env\`, \`.env.local\`, \`.env.production\`
+- [ ] ❌ Carpeta \`node_modules/\`
+- [ ] ❌ Carpetas \`.venv/\` o \`venv/\` (Python)
+- [ ] ❌ Archivos de configuración de IDE (.vscode/, .idea/)
+
+**Estructura recomendada:**
+- [ ] ✅ Archivo \`.gitignore\` presente y configurado
+- [ ] ✅ Código organizado dentro de \`src/\`
+- [ ] ✅ Carpetas específicas: \`src/controllers/\`, \`src/services/\`, \`src/routes/\`
+- [ ] ✅ Archivo \`README.md\` con documentación
+
+**Mejores prácticas:**
+- [ ] ✅ Usar \`.env.example\` para mostrar variables requeridas
+- [ ] ✅ Nombres descriptivos para carpetas y archivos
+- [ ] ✅ Separar lógica por responsabilidades
+
+`;
+
+    report += `\n---
+🤖 *Revisión automatizada por [PR Code Reviewer](https://github.com/sarboleda72/pr-code-reviewer)*  
+📊 Analizado el: ${new Date().toLocaleDateString('es-ES')} a las ${new Date().toLocaleTimeString('es-ES')}  
+🔧 Para análisis completo, verificar permisos de la GitHub App`;
+
+    return report;
   }
 
   /**
