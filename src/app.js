@@ -7,6 +7,9 @@
  * y ejecuta revisiones automáticas de Pull Requests.
  */
 
+// Cargar variables de entorno desde .env
+require('dotenv').config();
+
 const GitHubWebhookHandler = require('./github-webhook-handler');
 
 // Crear y configurar el handler de webhooks
