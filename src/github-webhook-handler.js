@@ -144,15 +144,11 @@ class GitHubWebhookHandler {
     console.log(`🔍 Analyzing PR #${pull_request.number} in ${repository.full_name}`);
     
     try {
-      // Análisis simplificado usando información del webhook
-      const analysisResult = this.analyzeWebhookData(pull_request, repository);
-      const report = this.generateSimpleReport(analysisResult, pull_request);
-      
-      await this.commentOnPR(
+      // Intentar análisis completo primero
+      await this.analyzeFullPR(
         repository.owner.login,
         repository.name,
-        pull_request.number,
-        report
+        pull_request.number
       );
     } catch (error) {
       console.error('❌ PR Analysis failed:', error);
@@ -172,6 +168,186 @@ Please check the server logs or contact support.
 🔧 *Automated review by PR Code Reviewer*`
       );
     }
+  }
+
+  /**
+   * Análisis completo usando CodeReviewer y analyzers
+   */
+  async analyzeFullPR(owner, repo, prNumber) {
+    console.log(`📊 Starting complete analysis: ${owner}/${repo}#${prNumber}`);
+
+    // Obtener archivos del PR
+    const { data: files } = await this.octokit.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_request_number: prNumber,
+    });
+
+    console.log(`📁 PR contains ${files.length} files`);
+
+    // Usar CodeReviewer para análisis completo
+    const CodeReviewer = require('./code-reviewer');
+    const reviewer = new CodeReviewer();
+
+    // Simular análisis en archivos del PR
+    const analysisResult = this.analyzeFileStructure(files, repo);
+    
+    // Generar reporte en español
+    const report = this.generateSpanishReport(analysisResult, files);
+
+    // Comentar en el PR
+    await this.commentOnPR(owner, repo, prNumber, report);
+
+    return { success: true, analysis: analysisResult, filesAnalyzed: files.length };
+  }
+
+  /**
+   * Analiza la estructura de archivos del PR
+   */
+  analyzeFileStructure(files, repoName) {
+    const results = {
+      projectType: 'nodejs', // Detectar automáticamente
+      summary: { passed: 0, failed: 0, warnings: 0 },
+      issues: [],
+      warnings: [],
+      successes: []
+    };
+
+    // Buscar archivos problemáticos
+    const problematicFiles = [];
+    const filesOutsideSrc = [];
+    const srcStructure = {
+      controllers: false,
+      services: false,
+      routes: false,
+      models: false,
+      utils: false,
+      gateways: false
+    };
+
+    let hasGitignore = false;
+    let hasPackageJson = false;
+
+    files.forEach(file => {
+      const filename = file.filename;
+      
+      // Verificar archivos prohibidos
+      if (filename.match(/^\.env/) && filename !== '.env.example') {
+        results.issues.push({
+          type: 'env-file',
+          file: filename,
+          message: `❌ Archivo de entorno detectado: ${filename}`,
+          suggestion: `Eliminar '${filename}' del repositorio y agregarlo a .gitignore. Usar '.env.example' para mostrar variables requeridas.`
+        });
+        results.summary.failed++;
+      }
+
+      // node_modules
+      if (filename.startsWith('node_modules/')) {
+        results.issues.push({
+          type: 'dependency-folder',
+          file: 'node_modules/',
+          message: '❌ Carpeta node_modules/ no debe estar en el repositorio',
+          suggestion: 'Agregar node_modules/ a .gitignore y eliminar del repositorio'
+        });
+        results.summary.failed++;
+      }
+
+      // .venv o venv
+      if (filename.startsWith('.venv/') || filename.startsWith('venv/')) {
+        results.issues.push({
+          type: 'venv-folder',
+          file: filename.split('/')[0] + '/',
+          message: `❌ Entorno virtual ${filename.split('/')[0]}/ no debe estar en el repositorio`,
+          suggestion: `Agregar ${filename.split('/')[0]}/ a .gitignore y eliminar del repositorio`
+        });
+        results.summary.failed++;
+      }
+
+      // Verificar .gitignore
+      if (filename === '.gitignore') {
+        hasGitignore = true;
+        results.successes.push({
+          type: 'gitignore',
+          message: '✅ Archivo .gitignore encontrado'
+        });
+        results.summary.passed++;
+      }
+
+      // Verificar package.json
+      if (filename === 'package.json') {
+        hasPackageJson = true;
+        results.successes.push({
+          type: 'package-json',
+          message: '✅ Archivo package.json encontrado'
+        });
+        results.summary.passed++;
+      }
+
+      // Verificar estructura src/
+      if (filename.startsWith('src/')) {
+        // Detectar subcarpetas de src
+        const parts = filename.split('/');
+        if (parts.length > 1) {
+          const folder = parts[1];
+          if (srcStructure.hasOwnProperty(folder)) {
+            srcStructure[folder] = true;
+          }
+        }
+      } else {
+        // Archivos fuera de src que podrían estar dentro
+        if (filename.match(/\.(js|ts|jsx|tsx)$/) && !filename.match(/^(test|spec|\.)/)) {
+          const parts = filename.split('/');
+          if (parts.length === 1 || !parts[0].match(/^(node_modules|dist|build|coverage)/)) {
+            filesOutsideSrc.push(filename);
+          }
+        }
+      }
+    });
+
+    // Verificar archivos faltantes
+    if (!hasGitignore) {
+      results.issues.push({
+        type: 'missing-gitignore',
+        message: '❌ Archivo .gitignore faltante',
+        suggestion: 'Crear archivo .gitignore para excluir archivos innecesarios del control de versiones'
+      });
+      results.summary.failed++;
+    }
+
+    // Verificar estructura recomendada
+    const recommendedFolders = ['controllers', 'services', 'routes'];
+    const missingSrcFolders = recommendedFolders.filter(folder => !srcStructure[folder]);
+    
+    if (Object.values(srcStructure).some(exists => exists)) {
+      results.successes.push({
+        type: 'src-structure',
+        message: '✅ Estructura src/ encontrada'
+      });
+      results.summary.passed++;
+
+      // Recomendar carpetas faltantes
+      if (missingSrcFolders.length > 0) {
+        results.warnings.push({
+          type: 'missing-folders',
+          message: `⚠️  Considerar agregar: src/${missingSrcFolders.join('/, src/')}/ para mejor organización`,
+          suggestion: 'Organizar el código en carpetas específicas (controllers, services, routes) mejora la mantenibilidad'
+        });
+        results.summary.warnings++;
+      }
+    }
+
+    // Archivos fuera de src/
+    if (filesOutsideSrc.length > 0) {
+      results.warnings.push({
+        type: 'files-outside-src',
+        message: `⚠️  Archivos fuera de src/: ${filesOutsideSrc.slice(0, 3).join(', ')}${filesOutsideSrc.length > 3 ? '...' : ''}`,
+        suggestion: 'Considerar mover archivos de código a la carpeta src/ para mejor organización'
+      });
+      results.summary.warnings++;
+    }
+
+    return results;
   }
 
   /**
@@ -227,6 +403,82 @@ Please check the server logs or contact support.
     }
 
     return results;
+  }
+
+  /**
+   * Genera reporte completo en español
+   */
+  generateSpanishReport(analysis, files) {
+    let report = `🤖 **Revisión de Estructura de Código**
+
+📁 **Archivos analizados:** ${files.length}
+🔧 **Tipo de proyecto:** ${analysis.projectType}
+📊 **Resultados:** ${analysis.summary.passed} ✅ | ${analysis.summary.failed} ❌ | ${analysis.summary.warnings} ⚠️
+
+`;
+
+    // Problemas críticos
+    if (analysis.issues.length > 0) {
+      report += `## ❌ Problemas Encontrados\n\n`;
+      analysis.issues.forEach(issue => {
+        report += `**${issue.message}**\n`;
+        if (issue.suggestion) {
+          report += `💡 *${issue.suggestion}*\n\n`;
+        }
+      });
+    }
+
+    // Advertencias
+    if (analysis.warnings.length > 0) {
+      report += `## ⚠️  Recomendaciones\n\n`;
+      analysis.warnings.forEach(warning => {
+        report += `**${warning.message}**\n`;
+        if (warning.suggestion) {
+          report += `💡 *${warning.suggestion}*\n\n`;
+        }
+      });
+    }
+
+    // Buenas prácticas encontradas
+    if (analysis.successes.length > 0) {
+      report += `## ✅ Buenas Prácticas Encontradas\n\n`;
+      analysis.successes.forEach(success => {
+        report += `${success.message}\n`;
+      });
+      report += `\n`;
+    }
+
+    // Estructura recomendada
+    report += `## 📁 Estructura Recomendada
+
+Para proyectos Node.js, se recomienda la siguiente organización:
+
+\`\`\`
+src/
+├── controllers/     # Controladores de rutas
+├── services/        # Lógica de negocio  
+├── routes/          # Definición de rutas
+├── models/          # Modelos de datos
+├── utils/           # Utilidades y helpers
+└── gateways/        # Conexiones externas
+\`\`\`
+
+## 🔧 Mejores Prácticas
+
+- ✅ **Nunca commitear** archivos .env (usar .env.example)
+- ✅ **Excluir** node_modules/ y .venv/ en .gitignore
+- ✅ **Organizar código** dentro de src/ por responsabilidades
+- ✅ **Usar nombres descriptivos** para carpetas y archivos
+- ✅ **Mantener** estructura consistente en el proyecto
+
+`;
+
+    report += `\n---
+🤖 *Revisión automatizada por [PR Code Reviewer](https://github.com/sarboleda72/pr-code-reviewer)*  
+📊 Analizado el: ${new Date().toLocaleDateString('es-ES')} a las ${new Date().toLocaleTimeString('es-ES')}  
+📝 Archivos revisados: ${files.map(f => f.filename).slice(0, 5).join(', ')}${files.length > 5 ? '...' : ''}`;
+
+    return report;
   }
 
   /**
