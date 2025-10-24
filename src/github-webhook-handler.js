@@ -180,6 +180,7 @@ class GitHubWebhookHandler {
     });
 
     console.log(`📁 PR contains ${files.length} files`);
+    console.log('✅ GitHub API permissions working! Full analysis enabled.');
 
     // Usar CodeReviewer para análisis completo
     const CodeReviewer = require('./code-reviewer');
