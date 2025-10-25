@@ -1,4 +1,21 @@
-# Dependencies
+.env
+node_modules/
+.venv/
+.DS_Store
+.vscode/
+.idea/
+dist/
+.env.local
+.env.production
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+logs/
+*.log
+# Lock files (optional)
+package-lock.json
+yarn.lock# Dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
