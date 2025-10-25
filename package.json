@@ -21,6 +21,8 @@
   "author": "gohan",
   "license": "MIT",
   "dependencies": {
+    "@octokit/app": "^16.1.1",
+    "@octokit/auth-app": "^8.1.1",
     "@octokit/rest": "^20.0.2",
     "@octokit/webhooks": "^12.0.4",
     "dotenv": "^17.2.3",

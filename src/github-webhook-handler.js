@@ -176,7 +176,7 @@ class GitHubWebhookHandler {
     const { data: files } = await this.octokit.rest.pulls.listFiles({
       owner,
       repo,
-      pull_request_number: prNumber,
+      pull_number: prNumber,
     });
 
     console.log(`📁 PR contains ${files.length} files`);
@@ -696,14 +696,14 @@ This is a basic analysis using PR metadata. For detailed file analysis, please e
     const { data: pr } = await this.octokit.rest.pulls.get({
       owner,
       repo,
-      pull_request_number: prNumber,
+      pull_number: prNumber,
     });
 
     // 2. Obtener archivos del PR
     const { data: files } = await this.octokit.rest.pulls.listFiles({
       owner,
       repo,
-      pull_request_number: prNumber,
+      pull_number: prNumber,
     });
 
     console.log(`📁 PR contains ${files.length} files`);
